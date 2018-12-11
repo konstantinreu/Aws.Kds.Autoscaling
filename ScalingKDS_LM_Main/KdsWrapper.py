@@ -52,6 +52,32 @@ def getKdsUtilization(KdsName, lookbackRangeSec = 60):
                    'ValidOn'            : currentTS
     };
 
+# Merge shards to reach target utilization
+def mergeShards(KdsName, shardCountNow, currentUtilization, targetUtilization):
+    targetReducePct = 0;
+    targetShard = 0;
+
+    if currentUtilization == 0:
+        targetReducePct = 100;
+    else:
+        targetReducePct =  (currentUtilization - targetUtilization) / targetUtilization;
+
+    #post correction
+    if targetReducePct > 90:
+        targetReducePct = 75;
+
+    targetShard = shardCountNow - int(shardCountNow * targetReducePct / 100)
+
+    print("targetReducePct " + str(targetReducePct) + ". targetShards " + str(targetShard))
+
+    #get opened shards. Sort by key ranges. Take Top N by smallest range. Merge them
+
+    return
+
+
+def splitShards(KdsName):
+    return
+
 
 '''
 
