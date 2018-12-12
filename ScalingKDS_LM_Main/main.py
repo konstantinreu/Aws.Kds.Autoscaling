@@ -32,12 +32,32 @@ def handler_function(event, context):
 
     if KdsLoadInfo['Utilization']  < 20 and KdsLoadInfo['ShardCount'] > minShards:
         print('Merging shards')
-        KdsWrapper.mergeShards(KdsName,  KdsLoadInfo['ShardCount'], KdsLoadInfo['Utilization'], targetUtilization)
+        KdsWrapper.mergeShards(KdsName,  KdsLoadInfo['ShardCount'], KdsLoadInfo['Utilization'], targetUtilization, KdsInfo['Shards'])
     elif KdsLoadInfo['Utilization'] > 60 and KdsLoadInfo['ShardCount'] < maxShards:
         print('Splitting shards')
     else:
         print('No actions')
 
+    # condition for OPENED shards
+    shardsMergeCandidates = []
+    for shard in sorted(  filter(lambda x:  'EndingSequenceNumber' not in x['SequenceNumberRange'],  KdsInfo['Shards'] ), key=lambda x: x['HashKeyRange']['StartingHashKey'] ):
+        shardsMergeCandidates.append(
+            {
+                'ShardID1'  : shard['ShardId'],
+                'ShardID2'  : shard['ShardIdNext'],
+            }
+        );
+
+        print(json.dumps(shard))
+
+    print( json.dumps(
+        KdsClient.list_shards(
+        StreamName='rdm-dev-intake-kds-main',
+        #NextToken='string',
+        #ExclusiveStartShardId='string',
+        MaxResults=100
+       # StreamCreationTimestamp=datetime(2015, 1, 1)
+    ), default=datetime_handler ));
     return
 
 def datetime_handler(x):

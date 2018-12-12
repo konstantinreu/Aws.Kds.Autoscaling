@@ -53,7 +53,7 @@ def getKdsUtilization(KdsName, lookbackRangeSec = 60):
     };
 
 # Merge shards to reach target utilization
-def mergeShards(KdsName, shardCountNow, currentUtilization, targetUtilization):
+def mergeShards(KdsName, shardCountNow, currentUtilization, targetUtilization, shards):
     targetReducePct = 0;
     targetShard = 0;
 
