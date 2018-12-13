@@ -14,9 +14,10 @@ KdsClient = boto3.client('kinesis');
 CwClient = boto3.client('cloudwatch');
 KdsArn = os.environ['AWS_KINESIS_STREAM_ARN']
 KdsName = Utils.parse_arn(KdsArn)['resource'];
-minShards = int(os.environ['SCALE_SHARDS_MIN'])
-maxShards = int(os.environ['SCALE_SHARDS_MAX'])
-targetUtilization = int(os.environ['SCALE_TARGET_UTILIZATION'])
+ScaleMinShards = int(os.environ['SCALE_SHARDS_MIN'])
+ScaleMaxShards = int(os.environ['SCALE_SHARDS_MAX'])
+TargetUtilizationPct = int(os.environ['SCALE_TARGET_UTILIZATION'])
+MaxReduceIncreasePct = 50;     # 100 - most aggresive number, means double shards or reduce twice per run
 
 #CwAlarmName = os.environ['AutoScaleKDS-Dev']
 CwAlarmName = 'AutoScaleKDS-Dev'
@@ -28,28 +29,69 @@ def handler_function(event, context):
     KdsLoadInfo = KdsWrapper.getKdsUtilization(KdsName)
     print('KdsLoad ' + json.dumps(KdsLoadInfo, default=datetime_handler));
 
-    CloudwatchWrapper.publishMetrics('Scaling Metrics', KdsName, KdsLoadInfo['ShardCount'], KdsLoadInfo['Utilization'])
+    #ActiveShards list, pre-sorted by StartingHashKey
+    ActiveShards =  sorted(
+                            filter(lambda x: 'EndingSequenceNumber' not in x['SequenceNumberRange'], KdsInfo['Shards']),
+                            key=lambda x: x['HashKeyRange']['StartingHashKey']
+                    );
 
-    if KdsLoadInfo['Utilization']  < 20 and KdsLoadInfo['ShardCount'] > minShards:
-        print('Merging shards')
-        KdsWrapper.mergeShards(KdsName,  KdsLoadInfo['ShardCount'], KdsLoadInfo['Utilization'], targetUtilization, KdsInfo['Shards'])
-    elif KdsLoadInfo['Utilization'] > 60 and KdsLoadInfo['ShardCount'] < maxShards:
-        print('Splitting shards')
+    #logging of current metrics
+    CloudwatchWrapper.publishMetrics('Scaling Metrics', KdsName, KdsLoadInfo['ShardCount'], KdsLoadInfo['Utilization'])
+    CloudwatchWrapper.putLog(
+        'KDS: {KdsName}. Utilization: {Utilization}, ShardsCount {TotalShardsCount} , ActiveShardsCount {ActiveShardsCount}'.format(
+                KdsName = KdsName,
+                Utilization = KdsLoadInfo['Utilization'],
+                TotalShardsCount = len( KdsInfo['Shards'] ),
+                ActiveShardsCount = len(ActiveShards)
+        ), False );
+
+
+    CurrentUtilization =  20 #int(KdsLoadInfo['Utilization']),
+    TargetReducePct = 0;
+    TargetIncreasePct = 0;
+    CurrentShardsCount = int(len(ActiveShards));
+    TargetShardsCount  = int(len(ActiveShards));
+
+    # Determine action and targetnumber of shards
+    # Ranges should be targetUtiliazation +- 10%
+    if CurrentUtilization < 40 and CurrentShardsCount > ScaleMinShards:
+        if CurrentUtilization == 0:
+            TargetReducePct = MaxReduceIncreasePct;
+        else:
+            TargetReducePct = 100*(TargetUtilizationPct - CurrentUtilization ) / CurrentUtilization;
+
+        TargetShardsCount = int(CurrentShardsCount *  TargetReducePct/100);
+        print("Action: MERGE. TargetReducePct " + str(TargetReducePct) + "%. TargetShards " + str(TargetShardsCount))
+
+        KdsWrapper.mergeShards(KdsName, ActiveShards, KdsInfo, CurrentShardsCount, TargetShardsCount);
+    elif KdsLoadInfo['Utilization'] > 60 and CurrentShardsCount < ScaleMaxShards:
+        TargetIncreasePct = 100*(CurrentUtilization - TargetUtilizationPct) / CurrentUtilization;
+
+        # post correction
+        if TargetIncreasePct > MaxReduceIncreasePct:
+            TargetIncreasePct = MaxReduceIncreasePct;
+
+        TargetShardsCount = int(CurrentShardsCount * (1+TargetIncreasePct/100));
+
+        #KdsWrapper.splitShards(KdsName, ActiveShards, KdsInfo,  )
+        print("Action: MERGE. TargetReducePct " + str(TargetReducePct) + "%. TargetShards " + str(TargetShardsCount))
+        #splitShards(KdsName, ActiveShards, KdsInfo, CurrentShardsCount, TargetShardsCount):
     else:
         print('No actions')
 
     # condition for OPENED shards
+    '''
     shardsMergeCandidates = []
     for shard in sorted(  filter(lambda x:  'EndingSequenceNumber' not in x['SequenceNumberRange'],  KdsInfo['Shards'] ), key=lambda x: x['HashKeyRange']['StartingHashKey'] ):
         shardsMergeCandidates.append(
             {
-                'ShardID1'  : shard['ShardId'],
-                'ShardID2'  : shard['ShardIdNext'],
+                'ShardID1'  : shard['ShardId']
+                #'ShardID2'  : shard['ShardId'],
             }
         );
 
         print(json.dumps(shard))
-
+    '''
     print( json.dumps(
         KdsClient.list_shards(
         StreamName='rdm-dev-intake-kds-main',

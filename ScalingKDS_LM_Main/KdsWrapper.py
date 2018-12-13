@@ -2,6 +2,8 @@ import boto3
 import CloudwatchWrapper
 import json
 import datetime
+import time
+import sys
 
 KdsClient = boto3.client('kinesis');
 
@@ -51,32 +53,95 @@ def getKdsUtilization(KdsName, lookbackRangeSec = 60):
                    'ThroughPutMax'      : openShards,
                    'ValidOn'            : currentTS
     };
+#############################################
+# MERGE shards to reach target utilization
+#############################################
+def mergeShards(KdsName, ActiveShards, KdsInfo, CurrentShardsCount, TargetShardsCount):
+    # Check
+    NumOfMerges = CurrentShardsCount - TargetShardsCount;
+    if NumOfMerges < 0:
+        raise Exception('TargetShardsCount cannot be greater than CurrentShardsCount for merging operation !')
 
-# Merge shards to reach target utilization
-def mergeShards(KdsName, shardCountNow, currentUtilization, targetUtilization, shards):
-    targetReducePct = 0;
-    targetShard = 0;
+    #ActiveShards already sorted, so two adjacent shards are candidates
+    ShardPairCandidates = [];
+    for idx, shard in  enumerate(ActiveShards[:-1]):
+        nextShard = ActiveShards[idx+1];
+        ShardPairCandidates.append(
+            {
+                'ShardId1'          : shard['ShardId'],
+                'ShardId2'          : nextShard['ShardId'],
+                'ShardId1KeyRanges' : shard['HashKeyRange'],
+                'ShardId2KeyRanges' : nextShard['HashKeyRange'],
+                'CombinedKeyRange'  : int(int(shard['HashKeyRange']['StartingHashKey'])+int(nextShard['HashKeyRange']['EndingHashKey']))
+            }
+        )
 
-    if currentUtilization == 0:
-        targetReducePct = 100;
-    else:
-        targetReducePct =  (currentUtilization - targetUtilization) / targetUtilization;
 
-    #post correction
-    if targetReducePct > 90:
-        targetReducePct = 75;
+    #Sort shards desc by distance HiKey - LowKey
+    ShardPairCandidates = sorted(
+                                ShardPairCandidates,
+                                key = lambda x: int( x['CombinedKeyRange']),
+                                reverse=1);
 
-    targetShard = shardCountNow - int(shardCountNow * targetReducePct / 100)
+    # To reach TargetShardsCount, we have to perform NumOfSplits splitting
+    print(json.dumps(ShardPairCandidates));
+    for idx, pair in  enumerate(ShardPairCandidates[:NumOfMerges]):
+        CloudwatchWrapper.putLog('MERGE # ' + str(idx) + ' Shard1: ' + pair['ShardId1'] + ' & Shard2: ' + pair['ShardId2'], False);
 
-    print("targetReducePct " + str(targetReducePct) + ". targetShards " + str(targetShard))
+        KdsClient.merge_shards(
+            StreamName   = KdsName,
+            ShardToMerge = pair['ShardId1'],
+            AdjacentShardToMerge=pair['ShardId2']
+        );
+        # wait until split finishes. Queue status should be Active
+        waitActiveState4KDS;
 
     #get opened shards. Sort by key ranges. Take Top N by smallest range. Merge them
 
     return
 
+#############################################
+# SPLIT shards to reach target utilization
+#############################################
+def splitShards(KdsName, ActiveShards, CurrentShardsCount, TargetShardsCount):
+    # Check
+    NumOfSplits = TargetShardsCount - CurrentShardsCount;
+    if NumOfSplits < 0:
+        raise Exception('TargetShardsCount cannot be less than CurrentShardsCount for splitting operation !')
 
-def splitShards(KdsName):
+    #Sort shards desc by distance HiKey - LowKey
+    ShardsSortedByRangePool = sorted(
+                                    filter(lambda x:  'EndingSequenceNumber' not in x['SequenceNumberRange'],  ActiveShards),
+                                    key =lambda x: (int(x['HashKeyRange']['EndingHashKey'])-int(x['HashKeyRange']['StartingHashKey'])),
+                                    reverse=1)
+
+    # To reach TargetShardsCount, we have to perform NumOfSplits splitting
+    for x in ShardsSortedByRangePool[:NumOfSplits]:
+        newStartingHashKey = ((int(x['HashKeyRange']['StartingHashKey'])+int(x['HashKeyRange']['EndingHashKey']))/2)
+        KdsClient.split_shard(
+            StreamName=KdsName,
+            ShardToSplit=x['ShardId'],
+            NewStartingHashKey=str(newStartingHashKey)
+        );
+        # wait until split finishes. Queue status should be Active
+        waitActiveState4KDS;
+
     return
+
+
+def waitActiveState4KDS(KdsName):
+    timeoutSec = 3;
+    sleepIntervalSec = 3;
+    intervalWaited = 0;
+
+    while True:
+        time.sleep(sleepIntervalSec);
+        if getKdsInfo(KdsName)['StreamStatus'] == 'ACTIVE':
+            break
+        intervalWaited+=1;
+        if intervalWaited > (timeoutSec / sleepIntervalSec):
+            raise Exception('Timeout for waiting ACTIVE status of KDS:' + KdsName)
+
 
 
 '''
