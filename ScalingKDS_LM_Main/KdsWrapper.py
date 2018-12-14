@@ -145,7 +145,7 @@ def splitShards(KdsName, ActiveShards, CurrentShardsCount, TargetShardsCount):
             ShardToSplit=x['ShardId'],
             NewStartingHashKey=str(newStartingHashKey)
         );
-        '
+
         # wait until split finishes. Queue status should be Active
 
     return
