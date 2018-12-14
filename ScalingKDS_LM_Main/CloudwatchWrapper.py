@@ -36,7 +36,7 @@ def publishMetrics(dimensionName, dimensionValue, shardCount, utilizationPct):
                 ],
                 #'Timestamp': datetime(2015, 1, 1),
                 'Value': utilizationPct,
-                'Unit': 'None'
+                'Unit': 'Percent'
                 # ,'StorageResolution': 123
             },
 
@@ -119,7 +119,8 @@ def putLog(message, isError, redirectToConsole = True):
             descending=True
         );
 
-        LogsSequenceToken = response['logStreams'][0]['uploadSequenceToken']
+        if 'uploadSequenceToken' in response['logStreams'][0]:
+            LogsSequenceToken = response['logStreams'][0]['uploadSequenceToken']
         #print('LogsSequenceToken: ' + LogsSequenceToken + '. Dump: ' +json.dumps(response));
 
     resp = LogsClient.put_log_events(
@@ -131,10 +132,11 @@ def putLog(message, isError, redirectToConsole = True):
                 'message': message
             }
         ],
-    sequenceToken = LogsSequenceToken
+     sequenceToken = LogsSequenceToken
     )
 
     LogsSequenceToken = resp['nextSequenceToken'];
+
 
 '''
 Metric{"MetricDataResults": [{"Id": "idIncomingBytes", "Label": "IncomingBytes", "Timestamps": [], "Values": [], "StatusCode": "Complete"}], "ResponseMetadata": {"RequestId": "a4a5a8e1-fd93-11e8-a502-8907912142bb", "HTTPStatusCode": 200, "HTTPHeaders": {"x-amzn-requestid": "a4a5a8e1-fd93-11e8-a502-8907912142bb", "content-type": "text/xml", "content-length": "493", "date": "Tue, 11 Dec 2018 22:25:19 GMT"}, "RetryAttempts": 0}}

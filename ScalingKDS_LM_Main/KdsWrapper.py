@@ -11,15 +11,26 @@ def getKdsInfo(KdsName):
     responseSummary = KdsClient.describe_stream_summary(
         StreamName=KdsName
     );
+
     responseDetails = KdsClient.describe_stream(
         StreamName=KdsName,
-        Limit=100
-    );
+        Limit=100);
+
+    shards = responseDetails["StreamDescription"]["Shards"]
+
+    while responseDetails['StreamDescription']['HasMoreShards'] == True:
+        StartShardID = responseDetails["StreamDescription"]["Shards"][-1]['ShardId']
+        responseDetails = KdsClient.describe_stream(
+            StreamName=KdsName,
+            ExclusiveStartShardId = StartShardID,
+            Limit=100);
+        shards.extend( responseDetails["StreamDescription"]["Shards"]);
+
 
     resp = {
         'StreamStatus'  : responseSummary['StreamDescriptionSummary']['StreamStatus'],
         'OpenShardCount': responseSummary['StreamDescriptionSummary']['OpenShardCount'],
-        'Shards'        : responseDetails["StreamDescription"]["Shards"]
+        'Shards'        : shards
     }
 
     return resp;
@@ -41,15 +52,16 @@ def getKdsUtilization(KdsName, lookbackRangeSec = 60):
     currentThroughputKbps = 0;
     currentTS = datetime.datetime.utcnow();
 
+    #print(json.dumps(rawMetric))
     if len(rawMetric['Values']) > 0:
         currentThroughputKbps = rawMetric['Values'][0] / 1048576/period;
-        currentTS = rawMetric['Timetamps'][0];
+        currentTS = rawMetric['Timestamps'][0];
 
 
     return {
                    'ShardCount'         : openShards,
                    'ThroughPutActual'   : currentThroughputKbps,
-                   'Utilization'        : 100* currentThroughputKbps / openShards,
+                   'Utilization'        : int(100* currentThroughputKbps / openShards),
                    'ThroughPutMax'      : openShards,
                    'ValidOn'            : currentTS
     };
@@ -58,7 +70,7 @@ def getKdsUtilization(KdsName, lookbackRangeSec = 60):
 #############################################
 def mergeShards(KdsName, ActiveShards, KdsInfo, CurrentShardsCount, TargetShardsCount):
     # Check
-    NumOfMerges = CurrentShardsCount - TargetShardsCount;
+    NumOfMerges = int(CurrentShardsCount - TargetShardsCount);
     if NumOfMerges < 0:
         raise Exception('TargetShardsCount cannot be greater than CurrentShardsCount for merging operation !')
 
@@ -76,25 +88,32 @@ def mergeShards(KdsName, ActiveShards, KdsInfo, CurrentShardsCount, TargetShards
             }
         )
 
-
-    #Sort shards desc by distance HiKey - LowKey
-    ShardPairCandidates = sorted(
-                                ShardPairCandidates,
-                                key = lambda x: int( x['CombinedKeyRange']),
-                                reverse=1);
-
-    # To reach TargetShardsCount, we have to perform NumOfSplits splitting
-    print(json.dumps(ShardPairCandidates));
-    for idx, pair in  enumerate(ShardPairCandidates[:NumOfMerges]):
-        CloudwatchWrapper.putLog('MERGE # ' + str(idx) + ' Shard1: ' + pair['ShardId1'] + ' & Shard2: ' + pair['ShardId2'], False);
-
+    # Perform number of merges
+    for i in range(0, NumOfMerges):
+        # Sort shards desc by distance HiKey - LowKey
+        ShardPairCandidates = sorted(
+                                    ShardPairCandidates,
+                                    key = lambda x: int( x['CombinedKeyRange']),
+                                    reverse=0);
+        print(json.dumps(ShardPairCandidates))
+        pair = ShardPairCandidates[0];
+        # wait until split finishes. Queue status should be Active
+        waitActiveState4KDS(KdsName);
+        CloudwatchWrapper.putLog('MERGE # ' + str(i) + ' Shard1: ' + pair['ShardId1'] + ' & Shard2: ' + pair['ShardId2'], False);
         KdsClient.merge_shards(
             StreamName   = KdsName,
             ShardToMerge = pair['ShardId1'],
             AdjacentShardToMerge=pair['ShardId2']
         );
-        # wait until split finishes. Queue status should be Active
-        waitActiveState4KDS;
+
+        #adjust leftover pairs in array
+        ShardPairCandidates = list(filter(lambda x: not (x['ShardId1'] == pair['ShardId2'] or x['ShardId1'] == pair['ShardId1'] or x['ShardId2'] == pair['ShardId1'] or x['ShardId2'] == pair['ShardId2']  ), ShardPairCandidates))
+        print('ShardPairCandidates left :' + str(len(ShardPairCandidates)));
+
+        if len(ShardPairCandidates) == 0:
+            print('No more candidates for merge!')
+            break;
+
 
     #get opened shards. Sort by key ranges. Take Top N by smallest range. Merge them
 
@@ -116,28 +135,32 @@ def splitShards(KdsName, ActiveShards, CurrentShardsCount, TargetShardsCount):
                                     reverse=1)
 
     # To reach TargetShardsCount, we have to perform NumOfSplits splitting
-    for x in ShardsSortedByRangePool[:NumOfSplits]:
-        newStartingHashKey = ((int(x['HashKeyRange']['StartingHashKey'])+int(x['HashKeyRange']['EndingHashKey']))/2)
+    for idx, x in enumerate(ShardsSortedByRangePool[:NumOfSplits]):
+        waitActiveState4KDS(KdsName);
+        newStartingHashKey = int( (int(x['HashKeyRange']['StartingHashKey'])+int(x['HashKeyRange']['EndingHashKey']))/2 )
+        CloudwatchWrapper.putLog('SPLIT # ' + str(idx) + ' Shard1: ' + x['ShardId'], False);
+
         KdsClient.split_shard(
             StreamName=KdsName,
             ShardToSplit=x['ShardId'],
             NewStartingHashKey=str(newStartingHashKey)
         );
+        '
         # wait until split finishes. Queue status should be Active
-        waitActiveState4KDS;
 
     return
 
 
 def waitActiveState4KDS(KdsName):
-    timeoutSec = 3;
-    sleepIntervalSec = 3;
+    timeoutSec = 30;
+    sleepIntervalSec = 1;
     intervalWaited = 0;
 
     while True:
-        time.sleep(sleepIntervalSec);
+        #print(getKdsInfo(KdsName)['StreamStatus'])
         if getKdsInfo(KdsName)['StreamStatus'] == 'ACTIVE':
             break
+        time.sleep(sleepIntervalSec);
         intervalWaited+=1;
         if intervalWaited > (timeoutSec / sleepIntervalSec):
             raise Exception('Timeout for waiting ACTIVE status of KDS:' + KdsName)
