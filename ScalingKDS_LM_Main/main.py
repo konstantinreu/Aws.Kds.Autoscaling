@@ -26,7 +26,7 @@ CwAlarmName = 'AutoScaleKDS-Dev'
 
 def handler_function(event, context):
     KdsInfo = KdsWrapper.getKdsInfo(KdsName);
-    print('KdsInfo ' + json.dumps(KdsInfo, default=datetime_handler));
+    #print('KdsInfo ' + json.dumps(KdsInfo, default=datetime_handler));
 
     KdsLoadInfo = KdsWrapper.getKdsUtilization(KdsName)
     print('KdsLoad ' + json.dumps(KdsLoadInfo, default=datetime_handler));
@@ -90,17 +90,7 @@ def handler_function(event, context):
 
     # condition for OPENED shards
     '''
-    shardsMergeCandidates = []
-    for shard in sorted(  filter(lambda x:  'EndingSequenceNumber' not in x['SequenceNumberRange'],  KdsInfo['Shards'] ), key=lambda x: x['HashKeyRange']['StartingHashKey'] ):
-        shardsMergeCandidates.append(
-            {
-                'ShardID1'  : shard['ShardId']
-                #'ShardID2'  : shard['ShardId'],
-            }
-        );
 
-        print(json.dumps(shard))
-    '''
     print( json.dumps(
         KdsClient.list_shards(
         StreamName='rdm-dev-intake-kds-main',
@@ -109,6 +99,7 @@ def handler_function(event, context):
         MaxResults=100
        # StreamCreationTimestamp=datetime(2015, 1, 1)
     ), default=datetime_handler ));
+    '''
     return
 
 def datetime_handler(x):

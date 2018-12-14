@@ -95,11 +95,12 @@ def mergeShards(KdsName, ActiveShards, KdsInfo, CurrentShardsCount, TargetShards
                                     ShardPairCandidates,
                                     key = lambda x: int( x['CombinedKeyRange']),
                                     reverse=0);
-        print(json.dumps(ShardPairCandidates))
+
+        #print(json.dumps(ShardPairCandidates))
+
         pair = ShardPairCandidates[0];
-        # wait until split finishes. Queue status should be Active
-        waitActiveState4KDS(KdsName);
         CloudwatchWrapper.putLog('MERGE # ' + str(i) + ' Shard1: ' + pair['ShardId1'] + ' & Shard2: ' + pair['ShardId2'], False);
+        waitActiveState4KDS(KdsName);
         KdsClient.merge_shards(
             StreamName   = KdsName,
             ShardToMerge = pair['ShardId1'],
@@ -130,16 +131,16 @@ def splitShards(KdsName, ActiveShards, CurrentShardsCount, TargetShardsCount):
 
     #Sort shards desc by distance HiKey - LowKey
     ShardsSortedByRangePool = sorted(
-                                    filter(lambda x:  'EndingSequenceNumber' not in x['SequenceNumberRange'],  ActiveShards),
-                                    key =lambda x: (int(x['HashKeyRange']['EndingHashKey'])-int(x['HashKeyRange']['StartingHashKey'])),
-                                    reverse=1)
+                                    ActiveShards,
+                                    key = lambda x: int(x['HashKeyRange']['EndingHashKey']) - int(x['HashKeyRange']['StartingHashKey']),
+                                    reverse=1
+    );
 
     # To reach TargetShardsCount, we have to perform NumOfSplits splitting
     for idx, x in enumerate(ShardsSortedByRangePool[:NumOfSplits]):
-        waitActiveState4KDS(KdsName);
         newStartingHashKey = int( (int(x['HashKeyRange']['StartingHashKey'])+int(x['HashKeyRange']['EndingHashKey']))/2 )
         CloudwatchWrapper.putLog('SPLIT # ' + str(idx) + ' Shard1: ' + x['ShardId'], False);
-
+        waitActiveState4KDS(KdsName);
         KdsClient.split_shard(
             StreamName=KdsName,
             ShardToSplit=x['ShardId'],
