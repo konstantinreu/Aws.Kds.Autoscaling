@@ -121,7 +121,7 @@ def mergeShards(KdsName, ActiveShards, KdsInfo, CurrentShardsCount, TargetShards
     return
 
 #############################################
-# SPLIT shards to reach target utilization
+# SPLIT/ScaleUp shards to reach target utilization
 #############################################
 def splitShards(KdsName, ActiveShards, CurrentShardsCount, TargetShardsCount):
     # Check
@@ -141,6 +141,7 @@ def splitShards(KdsName, ActiveShards, CurrentShardsCount, TargetShardsCount):
         newStartingHashKey = int( (int(x['HashKeyRange']['StartingHashKey'])+int(x['HashKeyRange']['EndingHashKey']))/2 )
         CloudwatchWrapper.putLog('SPLIT # ' + str(idx) + ' Shard1: ' + x['ShardId'], False);
         waitActiveState4KDS(KdsName);
+
         KdsClient.split_shard(
             StreamName=KdsName,
             ShardToSplit=x['ShardId'],

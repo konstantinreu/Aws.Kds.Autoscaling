@@ -5,7 +5,7 @@ import json
 
 CwClient = boto3.client('cloudwatch');
 LogsClient = boto3.client('logs')
-LogsSequenceToken = "";
+LogsSequenceToken = None;
 
 def publishMetrics(dimensionName, dimensionValue, shardCount, utilizationPct):
     CwClient.put_metric_data(
@@ -111,7 +111,7 @@ def putLog(message, isError, redirectToConsole = True):
     if redirectToConsole == True:
         print(message);
 
-    if LogsSequenceToken == "":
+    if not LogsSequenceToken:
         response = LogsClient.describe_log_streams(
             logGroupName='rdm/MainGroup',
             logStreamNamePrefix='KdsScaleLogStream',
@@ -123,20 +123,22 @@ def putLog(message, isError, redirectToConsole = True):
             LogsSequenceToken = response['logStreams'][0]['uploadSequenceToken']
         #print('LogsSequenceToken: ' + LogsSequenceToken + '. Dump: ' +json.dumps(response));
 
-    resp = LogsClient.put_log_events(
-        logGroupName  = 'rdm/MainGroup',
-        logStreamName = 'KdsScaleLogStream',
-        logEvents=[
-            {
-                'timestamp': int(round(time.time() * 1000)),
-                'message': message
-            }
-        ],
-     sequenceToken = LogsSequenceToken
-    )
+    req = {
+          'logGroupName'  : 'rdm/MainGroup',
+          'logStreamName' : 'KdsScaleLogStream',
+          'logEvents' : [
+                {
+                    'timestamp': int(round(time.time() * 1000)),
+                    'message': message
+                }
+            ]
+    };
 
+    if LogsSequenceToken:
+           req['sequenceToken'] = LogsSequenceToken;
+
+    resp = LogsClient.put_log_events(**req);
     LogsSequenceToken = resp['nextSequenceToken'];
-
 
 '''
 Metric{"MetricDataResults": [{"Id": "idIncomingBytes", "Label": "IncomingBytes", "Timestamps": [], "Values": [], "StatusCode": "Complete"}], "ResponseMetadata": {"RequestId": "a4a5a8e1-fd93-11e8-a502-8907912142bb", "HTTPStatusCode": 200, "HTTPHeaders": {"x-amzn-requestid": "a4a5a8e1-fd93-11e8-a502-8907912142bb", "content-type": "text/xml", "content-length": "493", "date": "Tue, 11 Dec 2018 22:25:19 GMT"}, "RetryAttempts": 0}}
