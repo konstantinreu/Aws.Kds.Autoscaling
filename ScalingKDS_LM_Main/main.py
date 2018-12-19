@@ -25,6 +25,7 @@ MaxReducePct   = 30;     # 100 - most aggresive number, means double shards or r
 CwAlarmName = 'AutoScaleKDS-Dev'
 
 def handler_function(event, context):
+    CloudwatchWrapper.LogsSequenceToken = None ;
     KdsInfo = KdsWrapper.getKdsInfo(KdsName);
     #print('KdsInfo ' + json.dumps(KdsInfo, default=datetime_handler));
 

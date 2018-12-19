@@ -8,7 +8,7 @@ aws lambda update-function-code --function-name hackweek-autoscale-kds --zip-fil
     "Role": "arn:aws:iam::123456789012:role/grate-lambda-s3-execution-role",
     "Handler": "main.handler_function",
     "Description": "",
-    "Timeout": 3,
+    "Timeout": 60,
     "MemorySize": 512,
     "LastModified": "2018-11-20T20:41:16.647+0000",
     "Version": "$LATEST",
